@@ -3,6 +3,7 @@ class Projectile extends Sprite {
         position = { x: 0, y: 0 },
         enemy,
         damage = 20,
+        crit = false,
         slow = null,
         slowDuration = 0,
         filter = 'none'
@@ -11,6 +12,7 @@ class Projectile extends Sprite {
         this.velocity = { x: 0, y: 0 }
         this.enemy = enemy
         this.damage = damage
+        this.crit = crit
         this.slow = slow
         this.slowDuration = slowDuration
         this.radius = 10

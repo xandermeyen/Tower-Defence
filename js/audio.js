@@ -63,6 +63,29 @@ class SFX {
             case 'gameover':
                 this.tone({ freq: 392, end: 98, type: 'sawtooth', duration: 1.2, volume: 0.08 })
                 break
+            case 'lightning':
+                this.tone({ freq: 1800, end: 200, type: 'sawtooth', duration: 0.12, volume: 0.035 })
+                this.tone({ freq: 2400, end: 400, type: 'square', duration: 0.06, volume: 0.02 })
+                break
+            case 'crit':
+                this.tone({ freq: 300, end: 80, type: 'sawtooth', duration: 0.14, volume: 0.06 })
+                this.tone({ freq: 600, end: 150, type: 'square', duration: 0.1, volume: 0.04, delay: 0.02 })
+                break
+            case 'meteorLaunch':
+                this.tone({ freq: 200, end: 600, type: 'sawtooth', duration: 0.5, volume: 0.05 })
+                break
+            case 'meteorImpact':
+                this.tone({ freq: 120, end: 30, type: 'sawtooth', duration: 0.6, volume: 0.1 })
+                this.tone({ freq: 80, end: 25, type: 'square', duration: 0.5, volume: 0.08, delay: 0.05 })
+                break
+            case 'nova':
+                this.tone({ freq: 1200, end: 300, type: 'sine', duration: 0.5, volume: 0.06 })
+                this.tone({ freq: 1800, end: 500, type: 'sine', duration: 0.4, volume: 0.04, delay: 0.08 })
+                break
+            case 'split':
+                this.tone({ freq: 500, end: 900, type: 'square', duration: 0.1, volume: 0.05 })
+                this.tone({ freq: 500, end: 900, type: 'square', duration: 0.1, volume: 0.05, delay: 0.1 })
+                break
         }
     }
 }

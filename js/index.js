@@ -57,6 +57,9 @@ const enemies = []
 const buildings = []
 const explosions = []
 const floatingTexts = []
+const particles = []
+const lightningBolts = []
+const meteors = []
 const spawnQueue = []
 let spawnTimer = 0
 let waveCountdown = 0
@@ -65,6 +68,7 @@ let selectedBuilding = null
 const shake = { duration: 0, intensity: 5 }
 
 const mouse = { x: undefined, y: undefined }
+let frameCount = 0
 
 // ----- DOM -----
 const el = (id) => document.getElementById(id)
@@ -86,13 +90,17 @@ const ui = {
     speedBtn: el('speedBtn'),
     muteBtn: el('muteBtn'),
     shopCannon: el('shopCannon'),
-    shopFrost: el('shopFrost')
+    shopFrost: el('shopFrost'),
+    shopTesla: el('shopTesla'),
+    spellMeteor: el('spellMeteor'),
+    spellNova: el('spellNova'),
+    bestScore: el('bestScore')
 }
 
 let selectedTowerType = 'cannon'
 
 function refreshShop() {
-    const buttons = { cannon: ui.shopCannon, frost: ui.shopFrost }
+    const buttons = { cannon: ui.shopCannon, frost: ui.shopFrost, tesla: ui.shopTesla }
     for (const [type, btn] of Object.entries(buttons)) {
         btn.classList.toggle('selected', selectedTowerType === type)
         btn.disabled = coins < TOWER_TYPES[type].levels[0].cost
@@ -106,6 +114,7 @@ function selectTowerType(type) {
 
 ui.shopCannon.addEventListener('click', () => selectTowerType('cannon'))
 ui.shopFrost.addEventListener('click', () => selectTowerType('frost'))
+ui.shopTesla.addEventListener('click', () => selectTowerType('tesla'))
 
 function updateHUD() {
     ui.coins.innerHTML = coins
@@ -180,6 +189,91 @@ ui.sellBtn.addEventListener('click', () => {
     refreshTowerPanel()
 })
 
+// ----- spells -----
+const SPELLS = {
+    meteor: { cooldown: 2400, timer: 0, btn: () => ui.spellMeteor, label: '&#9732; Meteor' },
+    nova: { cooldown: 1800, timer: 0, btn: () => ui.spellNova, label: '&#10052; Nova' }
+}
+let meteorTargeting = false
+
+function refreshSpellBar() {
+    for (const [name, spell] of Object.entries(SPELLS)) {
+        const btn = spell.btn()
+        if (spell.timer > 0) {
+            btn.disabled = true
+            btn.innerHTML = `${spell.label}<br><span>${Math.ceil(spell.timer / 60)}s</span>`
+        } else {
+            btn.disabled = false
+            btn.innerHTML =
+                `${spell.label}<br><span>${name === 'meteor' ? 'Q' : 'E'}</span>`
+        }
+    }
+    ui.spellMeteor.classList.toggle('targeting', meteorTargeting)
+}
+
+function castMeteor() {
+    if (SPELLS.meteor.timer > 0 || state !== 'playing') return
+    meteorTargeting = !meteorTargeting
+    refreshSpellBar()
+}
+
+function launchMeteor(x, y) {
+    meteorTargeting = false
+    SPELLS.meteor.timer = SPELLS.meteor.cooldown
+    meteors.push({
+        position: { x: x + 260, y: -120 },
+        target: { x, y },
+        speed: 14
+    })
+    sfx.play('meteorLaunch')
+    refreshSpellBar()
+}
+
+function castNova() {
+    if (SPELLS.nova.timer > 0 || state !== 'playing') return
+    SPELLS.nova.timer = SPELLS.nova.cooldown
+    for (const enemy of enemies) {
+        enemy.frozenTimer = 210
+        particleBurst(particles, {
+            x: enemy.center.x,
+            y: enemy.center.y,
+            count: 8,
+            colors: ['#bfeeff', '#7df9ff', 'white'],
+            speed: 3,
+            radius: 2.5,
+            fade: 0.03
+        })
+    }
+    shake.duration = 8
+    sfx.play('nova')
+    showBanner('FROST NOVA', 'The horde is frozen solid!', 1500)
+    refreshSpellBar()
+}
+
+ui.spellMeteor.addEventListener('click', castMeteor)
+ui.spellNova.addEventListener('click', castNova)
+
+// damage + kill bookkeeping in one place (towers, lightning and meteors use this)
+function damageEnemy(enemy, damage, color = 'white', size = 16) {
+    if (enemy.dead) return
+    enemy.health -= damage
+    floatingTexts.push(
+        new FloatingText({
+            position: {
+                x: enemy.center.x + (Math.random() - 0.5) * 30,
+                y: enemy.center.y - 30
+            },
+            text: damage,
+            color,
+            size
+        })
+    )
+    if (enemy.health <= 0) {
+        const index = enemies.indexOf(enemy)
+        if (index > -1) killEnemy(enemy, index)
+    }
+}
+
 // ----- waves -----
 function buildWaveQueue(waveNumber) {
     const queue = []
@@ -191,10 +285,14 @@ function buildWaveQueue(waveNumber) {
             ? Math.max(1, Math.floor(waveNumber / 2) - 2)
             : 0
     const bosses = waveNumber % 5 === 0 ? waveNumber / 5 : 0
+    const healers = waveNumber >= 4 ? Math.floor(waveNumber / 3) : 0
+    const splitters = waveNumber >= 6 ? Math.floor(waveNumber / 4) : 0
 
     for (let i = 0; i < normals; i++) queue.push('orc')
     for (let i = 0; i < speedies; i++) queue.push('speedy')
     for (let i = 0; i < tanks; i++) queue.push('tank')
+    for (let i = 0; i < healers; i++) queue.push('healer')
+    for (let i = 0; i < splitters; i++) queue.push('splitter')
 
     // shuffle the regular enemies
     for (let i = queue.length - 1; i > 0; i--) {
@@ -244,6 +342,53 @@ function killEnemy(enemy, index) {
     goldEarned += enemy.gold
     kills++
     sfx.play('death')
+
+    // death poof + a few gold sparks
+    particleBurst(particles, {
+        x: enemy.center.x,
+        y: enemy.center.y,
+        count: 10,
+        colors: ['#999', '#ccc', '#666'],
+        speed: 3,
+        radius: 3,
+        fade: 0.04
+    })
+    particleBurst(particles, {
+        x: enemy.center.x,
+        y: enemy.center.y - 10,
+        count: 4,
+        colors: ['gold', '#ffe97d'],
+        speed: 2.5,
+        radius: 2,
+        gravity: 0.08,
+        fade: 0.025
+    })
+
+    // splitters burst into two angry minis
+    if (enemy.type === 'splitter') {
+        for (let k = 0; k < 2; k++) {
+            enemies.push(
+                new Enemy({
+                    position: {
+                        x: enemy.position.x + (k === 0 ? -30 : 30),
+                        y: enemy.position.y + (k === 0 ? -12 : 12)
+                    },
+                    type: 'mini',
+                    waypointIndex: enemy.waypointIndex,
+                    healthOverride: Math.max(20, Math.round(enemy.maxHealth * 0.2))
+                })
+            )
+        }
+        sfx.play('split')
+        floatingTexts.push(
+            new FloatingText({
+                position: { x: enemy.center.x - 25, y: enemy.center.y - 50 },
+                text: 'SPLIT!',
+                color: '#caa6ff',
+                size: 20
+            })
+        )
+    }
     floatingTexts.push(
         new FloatingText({
             position: { x: enemy.center.x - 15, y: enemy.center.y - 40 },
@@ -255,12 +400,42 @@ function killEnemy(enemy, index) {
     updateHUD()
 }
 
+// ----- high score -----
+function loadBest() {
+    try {
+        return JSON.parse(localStorage.getItem('orcSiegeBest')) || null
+    } catch {
+        return null
+    }
+}
+
+function showBest() {
+    const best = loadBest()
+    ui.bestScore.innerHTML = best
+        ? `Best run: wave <b>${best.wave}</b> on ${best.difficulty}`
+        : ''
+}
+
 function gameOver() {
     state = 'gameover'
     sfx.play('gameover')
+
+    const best = loadBest()
+    let recordLine = ''
+    if (!best || wave > best.wave) {
+        localStorage.setItem(
+            'orcSiegeBest',
+            JSON.stringify({ wave, difficulty: difficulty.label })
+        )
+        recordLine = `<br><span style="color: gold">NEW RECORD!</span>`
+    } else {
+        recordLine = `<br><span style="color: #888">Best: wave ${best.wave} on ${best.difficulty}</span>`
+    }
+
     ui.finalStats.innerHTML =
         `You survived <b>${wave}</b> waves on ${difficulty.label}<br>` +
-        `${kills} enemies slain &nbsp;&bull;&nbsp; ${goldEarned} gold earned`
+        `${kills} enemies slain &nbsp;&bull;&nbsp; ${goldEarned} gold earned` +
+        recordLine
     ui.gameOver.style.display = 'flex'
 }
 
@@ -389,27 +564,30 @@ function step() {
 
             if (distance < hitRadius) {
                 if (!enemy.dead) {
-                    enemy.health -= projectile.damage
                     if (projectile.slow) {
                         enemy.slowTimer = projectile.slowDuration
                         enemy.slowFactor = projectile.slow
                     }
-                    sfx.play('hit')
-                    floatingTexts.push(
-                        new FloatingText({
-                            position: {
-                                x: enemy.center.x + (Math.random() - 0.5) * 30,
-                                y: enemy.center.y - 30
-                            },
-                            text: projectile.damage,
-                            color: 'white',
-                            size: 16
-                        })
-                    )
-                    if (enemy.health <= 0) {
-                        const enemyIndex = enemies.indexOf(enemy)
-                        if (enemyIndex > -1) killEnemy(enemy, enemyIndex)
+                    sfx.play(projectile.crit ? 'crit' : 'hit')
+                    if (projectile.crit) {
+                        floatingTexts.push(
+                            new FloatingText({
+                                position: {
+                                    x: enemy.center.x - 20,
+                                    y: enemy.center.y - 55
+                                },
+                                text: 'CRIT!',
+                                color: '#ff9d2e',
+                                size: 20
+                            })
+                        )
                     }
+                    damageEnemy(
+                        enemy,
+                        projectile.damage,
+                        projectile.crit ? '#ff9d2e' : 'white',
+                        projectile.crit ? 20 : 16
+                    )
                 }
                 explosions.push(
                     new Sprite({
@@ -430,6 +608,105 @@ function step() {
             }
         }
     })
+
+    // meteors
+    for (let i = meteors.length - 1; i >= 0; i--) {
+        const meteor = meteors[i]
+        const angle = Math.atan2(
+            meteor.target.y - meteor.position.y,
+            meteor.target.x - meteor.position.x
+        )
+        meteor.position.x += Math.cos(angle) * meteor.speed
+        meteor.position.y += Math.sin(angle) * meteor.speed
+
+        // fiery trail
+        particleBurst(particles, {
+            x: meteor.position.x,
+            y: meteor.position.y,
+            count: 3,
+            colors: ['#ff6b35', '#ffb627', '#fff3b0'],
+            speed: 1.5,
+            radius: 4,
+            fade: 0.06
+        })
+
+        // the rock itself
+        c.beginPath()
+        c.arc(meteor.position.x, meteor.position.y, 14, 0, Math.PI * 2)
+        c.fillStyle = '#5a3825'
+        c.fill()
+        c.lineWidth = 4
+        c.strokeStyle = '#ff8c42'
+        c.stroke()
+
+        // impact
+        if (
+            Math.hypot(
+                meteor.target.x - meteor.position.x,
+                meteor.target.y - meteor.position.y
+            ) < meteor.speed
+        ) {
+            meteors.splice(i, 1)
+            shake.duration = 22
+            sfx.play('meteorImpact')
+            particleBurst(particles, {
+                x: meteor.target.x,
+                y: meteor.target.y,
+                count: 40,
+                colors: ['#ff6b35', '#ffb627', '#fff3b0', '#777'],
+                speed: 8,
+                radius: 4,
+                gravity: 0.12,
+                fade: 0.025
+            })
+            for (let j = enemies.length - 1; j >= 0; j--) {
+                const enemy = enemies[j]
+                const distance = Math.hypot(
+                    enemy.center.x - meteor.target.x,
+                    enemy.center.y - meteor.target.y
+                )
+                if (distance < 150 + enemy.radius * 0.4) {
+                    damageEnemy(enemy, 260, '#ff9d2e', 20)
+                }
+            }
+        }
+    }
+
+    // meteor targeting reticle
+    if (meteorTargeting && mouse.x !== undefined) {
+        c.beginPath()
+        c.arc(mouse.x, mouse.y, 150, 0, Math.PI * 2)
+        c.fillStyle = 'rgba(255, 110, 40, 0.15)'
+        c.fill()
+        c.setLineDash([12, 8])
+        c.lineWidth = 3
+        c.strokeStyle = 'rgba(255, 140, 66, 0.9)'
+        c.stroke()
+        c.setLineDash([])
+    }
+
+    // lightning bolts
+    for (let i = lightningBolts.length - 1; i >= 0; i--) {
+        lightningBolts[i].update()
+        if (lightningBolts[i].life <= 0) lightningBolts.splice(i, 1)
+    }
+
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].update()
+        if (particles[i].alpha <= 0) particles.splice(i, 1)
+    }
+
+    // spell cooldowns
+    let spellTicked = false
+    for (const spell of Object.values(SPELLS)) {
+        if (spell.timer > 0) {
+            spell.timer--
+            spellTicked = true
+        }
+    }
+    if (spellTicked && frameCount % 15 === 0) refreshSpellBar()
+    frameCount++
 
     // explosions
     for (let i = explosions.length - 1; i >= 0; i--) {
@@ -469,6 +746,12 @@ function setMousePosition(event) {
 canvas.addEventListener('click', (event) => {
     if (state !== 'playing') return
     setMousePosition(event)
+
+    // meteor targeting takes priority over building
+    if (meteorTargeting) {
+        launchMeteor(mouse.x, mouse.y)
+        return
+    }
 
     if (activeTile && !activeTile.isOccupied) {
         const cost = TOWER_TYPES[selectedTowerType].levels[0].cost
@@ -534,6 +817,19 @@ window.addEventListener('keydown', (event) => {
         case '2':
             selectTowerType('frost')
             break
+        case '3':
+            selectTowerType('tesla')
+            break
+        case 'q':
+            castMeteor()
+            break
+        case 'e':
+            castNova()
+            break
+        case 'escape':
+            meteorTargeting = false
+            refreshSpellBar()
+            break
     }
 })
 
@@ -566,6 +862,7 @@ function startGame(difficultyKey) {
     waveCountdown = 300
     showBanner('Get ready!', 'Click the green tiles to build towers')
     updateHUD()
+    refreshSpellBar()
 }
 
 el('startEasy').addEventListener('click', () => startGame('easy'))
@@ -581,3 +878,4 @@ mapImage.onload = () => {
 }
 mapImage.src = 'img/TowerDefMap.png'
 updateHUD()
+showBest()
